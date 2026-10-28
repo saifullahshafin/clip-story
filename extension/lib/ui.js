@@ -83,7 +83,9 @@ export function detailHtml(c, related = []) {
   const source = c.url
     ? `<div class="src">${x.favicon ? `<img src="${esc(x.favicon)}" alt="">` : ''}<div><b>${esc(x.site || c.domain)}</b>
         <div class="faint">${esc((c.title || '').slice(0, 140))}</div></div></div>`
-    : `<div class="src"><div><b>Outside the browser</b><div class="faint">Copied from another app on this PC</div></div></div>`;
+    : c.source === 'import'
+      ? `<div class="src"><div><b>Imported from your old clipboard</b><div class="faint">The old extension did not record which page it came from</div></div></div>`
+      : `<div class="src"><div><b>Outside the browser</b><div class="faint">Copied from another app on this PC</div></div></div>`;
   const pasted = (c.uses || []).map(u => `${esc(u.domain || '?')} <span class="faint">${clock(u.ts)}${u.field && u.field !== 'other' ? ' · ' + u.field + ' field' : ''}</span>`).join('<br>');
   return `${source}
     <div class="btns">${open('Open exact spot', x.fragment, true)}${v ? open(`Open video at ${mmss(v.t)}`, v.url || c.url, !x.fragment) : ''}${open('Open page', c.url, !x.fragment && !v)}</div>

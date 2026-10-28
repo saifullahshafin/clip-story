@@ -16,7 +16,7 @@ function matches(c, q) {
 }
 
 function row(c) {
-  const where = c.domain || (c.source === 'system' ? 'outside browser' : '');
+  const where = c.domain || (c.source === 'import' ? 'old clipboard' : c.source === 'system' ? 'outside browser' : '');
   const login = (c.tags || []).find(t => t.startsWith('login:'));
   const uses = (c.uses || []).length ? ` · pasted ${c.uses.length}x` : '';
   return `<div class="clip" data-id="${c.id}">

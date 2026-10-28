@@ -124,6 +124,7 @@
           <b>Capture</b>
           <label>Never record copies from these sites (one per line) <textarea id="ignore" rows="5" class="mono" placeholder="mybank.com"></textarea></label>
           <label>Keep on this laptop for (days) <input id="localDays" type="number" min="1" max="365"></label>
+          <label>Import history from another clipboard app (.json) <input id="importFile" type="file" accept=".json,application/json"></label>
           <div style="display:flex; gap:8px; flex-wrap:wrap">
             <button id="saveCap" class="primary">Save</button>
             <button data-pause="15">Pause 15 min</button><button data-pause="60">Pause 1 h</button><button data-pause="0">Resume</button>

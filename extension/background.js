@@ -206,8 +206,64 @@ async function prune() {
   const s = await settings();
   const cutoff = Date.now() - s.localDays * 86400_000;
   for (const c of await db.range(0, cutoff)) {
-    if (c.synced && !c.pinned) await db.deleteClip(c.id);
+    if (c.synced && !c.pinned && c.source !== 'import') await db.deleteClip(c.id);
   }
+}
+
+// ---------- import from another clipboard manager ----------
+// Accepts [{text, dateAdded, isFavorite, tags}] (Clipboard History Pro style) and plain [{text, ts}] lists.
+// Every item goes through the normal pipeline: classify, seal secrets, merge duplicates, sync.
+async function importItems(items) {
+  const rows = (Array.isArray(items) ? items : items?.items || items?.history || [])
+    .map(i => ({ text: typeof i === 'string' ? i : i?.text ?? i?.content ?? i?.value, ts: +(i?.dateAdded ?? i?.ts ?? i?.timestamp ?? i?.date) || Date.now(),
+      fav: !!(i?.isFavorite ?? i?.pinned ?? i?.favorite), tags: Array.isArray(i?.tags) ? i.tags.map(String) : [] }))
+    .filter(i => typeof i.text === 'string' && i.text.trim())
+    .sort((a, b) => a.ts - b.ts);
+  let added = 0, merged = 0;
+  const prev = [];
+  for (const it of rows) {
+    const text = it.text.length > MAX_CHARS ? it.text.slice(0, MAX_CHARS) : it.text;
+    const h = await hmac(text);
+    const [same] = await db.byHmac(h);
+    if (same) {
+      same.copy_count = (same.copy_count || 1) + 1;
+      same.ts = Math.min(same.ts, it.ts); same.last_seen = Math.max(same.last_seen, it.ts);
+      if (it.fav) same.pinned = true;
+      same.synced = false;
+      await db.putClip(same); merged++;
+      continue;
+    }
+    const cls = classify(text, prev.slice(-5).map(p => ({ ...p, ts: Date.now() - (it.ts - p.ts) })));
+    const clip = {
+      id: crypto.randomUUID(), ts: it.ts, last_seen: it.ts, copy_count: 1,
+      kind: cls.kind, sensitive: cls.sensitive, length: text.length, hmac: h,
+      url: null, title: null, domain: null, source: 'import', pinned: it.fav, uses: [],
+      tags: ['imported', ...it.tags], context: null, synced: false,
+    };
+    if (cls.sensitive) await makeSecret(clip, text);
+    else { clip.text = text; clip.preview = text.slice(0, 200); }
+    await db.putClip(clip);
+    prev.push(clip); added++;
+  }
+  sync();
+  return { added, merged, total: rows.length };
+}
+
+// A history file dropped into extension/import/history.json is imported once, on the next reload.
+let importing = null;
+const importBundled = () => (importing ||= importBundledOnce());
+async function importBundledOnce() {
+  let raw;
+  try {
+    const res = await fetch(chrome.runtime.getURL('import/history.json'));
+    if (!res.ok) return;
+    raw = await res.text();
+  } catch { return; }
+  const fileId = await hmac(raw);
+  const { importedFiles = [] } = await chrome.storage.local.get('importedFiles');
+  if (importedFiles.includes(fileId)) return;
+  const result = await importItems(JSON.parse(raw));
+  await chrome.storage.local.set({ importedFiles: [...importedFiles, fileId], lastImport: { ...result, at: Date.now() } });
 }
 
 // ---------- wiring ----------
@@ -232,6 +288,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     pause: () => isExtensionPage(sender) && saveSettings({ pausedUntil: msg.minutes ? Date.now() + msg.minutes * 60_000 : 0 }),
     api: () => { if (!isExtensionPage(sender)) throw new Error('forbidden'); return api(msg.path, msg.opts); },
     badge: () => isExtensionPage(sender) && refreshBadge(),
+    'import-items': () => { if (!isExtensionPage(sender)) throw new Error('forbidden'); return importItems(msg.items); },
     'delete-clip': async () => {
       if (!isExtensionPage(sender)) return false;
       const c = (await db.getClip(msg.id)) || msg.clip;
@@ -256,6 +313,7 @@ chrome.alarms.onAlarm.addListener(a => {
 async function boot() {
   await ensureOffscreen();
   await deviceKeys();
+  importBundled();
   chrome.alarms.create('tick', { periodInMinutes: 1 });
   chrome.alarms.create('prune', { periodInMinutes: 24 * 60 });
 }

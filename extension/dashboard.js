@@ -277,6 +277,15 @@ $('#saveCap').onclick = async () => {
   });
   toast('Saved');
 };
+$('#importFile').onchange = async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try {
+    const r = await bg('import-items', { items: JSON.parse(await f.text()) });
+    toast(`Imported ${r.added} clips${r.merged ? `, merged ${r.merged} duplicates` : ''}`);
+  } catch (err) { toast('Import failed: ' + err.message); }
+  e.target.value = '';
+};
 document.querySelectorAll('[data-pause]').forEach(b => b.onclick = async () => {
   await bg('pause', { minutes: +b.dataset.pause }); header(); toast(+b.dataset.pause ? `Paused ${b.dataset.pause} min` : 'Resumed');
 });
