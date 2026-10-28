@@ -1,5 +1,5 @@
 import * as db from './lib/db.js';
-import { $, esc, bg, api, tagHtml, ago, clock, toast, statusLine, md } from './lib/ui.js';
+import { $, esc, bg, api, tagHtml, ago, clock, toast, statusLine, md, detailHtml } from './lib/ui.js';
 import { getBackup, createBackup, restoreBackup, openSealed } from './lib/crypto.js';
 
 const CHAIN_COLORS = ['#7cc4ff', '#6fd39a', '#f0b65a', '#b9a6ff', '#ff9fb2', '#5fd6d0'];
@@ -31,7 +31,7 @@ async function allClips(sinceMs) {
   try { remote = (await api(`/api/clips?since=${sinceMs}&limit=5000`)).clips; } catch { /* offline */ }
   const byId = new Map(remote.map(c => [c.id, c]));
   for (const c of local) byId.set(c.id, { ...byId.get(c.id), ...c });
-  return [...byId.values()].sort((a, b) => a.ts - b.ts);
+  return [...byId.values()].filter(c => !c.deleted).sort((a, b) => a.ts - b.ts);
 }
 
 // ---------- stories ----------
@@ -164,6 +164,7 @@ async function loadTimeline() {
         ${tagHtml(c)}<span class="mono faint" style="font-size:11px">${clock(c.ts)}</span>
         <div class="body"><div class="txt ${c.sensitive ? 'secret' : ''}">${esc(c.sensitive ? c.preview : (c.text || '').slice(0, 400))}</div>
         <div class="meta">${esc(c.domain || 'outside browser')}${c.title ? ' · ' + esc(c.title.slice(0, 80)) : ''}${(c.uses || []).length ? ' · pasted on ' + esc([...new Set(c.uses.map(u => u.domain))].join(', ')) : ''}</div></div>
+        <button class="ghost" data-more>More</button>
       </div>`).join('')}
     </div>`;
   }).join('');
@@ -172,11 +173,33 @@ async function loadTimeline() {
 $('#sessions').addEventListener('click', async e => {
   const re = e.target.closest('[data-reopen]');
   if (re) { for (const u of JSON.parse(re.dataset.reopen).slice(0, 12)) chrome.tabs.create({ url: /^https?:/.test(u) ? u : 'https://' + u, active: false }); return toast('Story reopened'); }
+  const open = e.target.closest('[data-open]');
+  if (open) return chrome.tabs.create({ url: open.dataset.open });
+  const all = await allClips(0);
+  const d = e.target.closest('[data-d]');
+  if (d) {
+    const c = all.find(x => x.id === d.closest('.detail').dataset.for);
+    if (d.dataset.d === 'copy') { await navigator.clipboard.writeText(c.sensitive ? await openSealed(c.sealed) : (c.text || '')); return toast('Copied'); }
+    if (d.dataset.d === 'pin') { const l = await db.getClip(c.id); if (l) { l.pinned = !l.pinned; l.synced = false; await db.putClip(l); } return toast(l?.pinned ? 'Pinned' : 'Unpinned'); }
+    if (d.dataset.d === 'seal') { await bg('make-secret', { id: c.id }); toast('Marked as secret'); return loadTimeline(); }
+    if (d.dataset.d === 'delete') {
+      if (!d.dataset.armed) { d.dataset.armed = '1'; d.textContent = 'Click again to delete'; return; }
+      await bg('delete-clip', { id: c.id, clip: c }); toast('Deleted'); return loadTimeline();
+    }
+    return;
+  }
+  if (e.target.closest('.detail')) return;
+  // Clicking a row (or More) opens where it came from; Copy lives in the panel.
   const el = e.target.closest('.clip');
   if (!el) return;
-  const c = (await allClips(0)).find(x => x.id === el.dataset.id);
-  await navigator.clipboard.writeText(c?.sensitive ? await openSealed(c.sealed) : (c?.text || ''));
-  toast('Copied');
+  const c = all.find(x => x.id === el.dataset.id);
+  const wasOpen = el.nextElementSibling?.classList.contains('detail');
+  document.querySelectorAll('#sessions .detail').forEach(x => x.remove());
+  if (!wasOpen && c) {
+    const related = c.url ? all.filter(x => x.url === c.url && x.id !== c.id).slice(-5) : [];
+    el.insertAdjacentHTML('afterend', `<div class="detail" data-for="${c.id}">${detailHtml(c, related)}</div>`);
+    el.nextElementSibling.querySelectorAll('img').forEach(i => i.addEventListener('error', () => i.remove()));
+  }
 });
 
 // ---------- vault ----------

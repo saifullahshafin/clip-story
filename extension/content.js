@@ -14,8 +14,82 @@
     : t.type === 'email' || /user|email|login|account/i.test((t.name || '') + (t.id || '') + (t.autocomplete || '')) ? 'username'
     : 'other';
 
-  document.addEventListener('copy', () => send({ type: 'copy-context', selection: selection(), ...ctx() }), true);
-  document.addEventListener('cut', () => send({ type: 'copy-context', selection: selection(), ...ctx() }), true);
+  // Exactly where the copy happened: surrounding text, section, link, video moment, jump-back link.
+  const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
+  const fragEnc = s => encodeURIComponent(s).replace(/-/g, '%2D');
+
+  function fragmentUrl(text) {
+    const t = clean(text);
+    if (!t || t.length > 2000) return null;
+    const base = location.href.split('#')[0];
+    const words = t.split(' ');
+    if (words.length <= 10) return `${base}#:~:text=${fragEnc(t)}`;
+    return `${base}#:~:text=${fragEnc(words.slice(0, 5).join(' '))},${fragEnc(words.slice(-5).join(' '))}`;
+  }
+
+  function nearestHeading(el) {
+    let best = null;
+    for (const h of document.querySelectorAll('h1,h2,h3,h4')) {
+      if (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING || h.contains(el)) best = h; else break;
+    }
+    return best ? clean(best.innerText).slice(0, 140) : null;
+  }
+
+  function videoMoment() {
+    const v = [...document.querySelectorAll('video')].find(x => x.currentTime > 0 && x.duration);
+    if (!v) return null;
+    const t = Math.floor(v.currentTime);
+    const out = { t, duration: Math.floor(v.duration) };
+    const id = new URLSearchParams(location.search).get('v');
+    if (/youtube\.com$/.test(location.hostname) && id) {
+      out.url = `https://www.youtube.com/watch?v=${id}&t=${t}s`;
+      out.channel = clean(document.querySelector('ytd-video-owner-renderer #channel-name a, #owner #channel-name a')?.textContent) || null;
+      out.videoTitle = clean(document.querySelector('h1.ytd-watch-metadata, #title h1')?.textContent) || null;
+    } else if (/youtu\.be$/.test(location.hostname)) {
+      out.url = `${location.origin}${location.pathname}?t=${t}`;
+    }
+    return out;
+  }
+
+  function sourceDetails() {
+    const text = selection();
+    const s = getSelection();
+    const a = document.activeElement;
+    const inField = a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT');
+    let node = inField ? a : (s && s.rangeCount ? s.getRangeAt(0).commonAncestorContainer : null);
+    const el = node ? (node.nodeType === 1 ? node : node.parentElement) : null;
+    const block = el && !inField ? el.closest('p,li,td,th,pre,code,blockquote,h1,h2,h3,h4,h5,h6,dd,figcaption,article,section,div') : null;
+    const blockText = block ? clean(block.innerText).slice(0, 4000) : '';
+    const sel = clean(text);
+    const i = sel ? blockText.indexOf(sel.slice(0, 200)) : -1;
+    const link = el?.closest('a[href]');
+    const meta = n => document.querySelector(`meta[property="${n}"],meta[name="${n}"]`)?.content || null;
+    const icon = document.querySelector('link[rel~="icon"]')?.href;
+    const scroll = document.documentElement.scrollHeight - innerHeight;
+    return {
+      before: i > 0 ? blockText.slice(Math.max(0, i - 220), i) : null,
+      after: i >= 0 ? blockText.slice(i + sel.length, i + sel.length + 220) : null,
+      heading: el ? nearestHeading(el) : null,
+      element: el ? (inField ? `${a.tagName.toLowerCase()}${a.type ? ':' + a.type : ''}` : (block || el).tagName.toLowerCase()) : null,
+      link: link ? { href: link.href, text: clean(link.innerText).slice(0, 120) } : null,
+      fragment: inField ? null : fragmentUrl(text),
+      video: videoMoment(),
+      site: meta('og:site_name'),
+      description: (meta('og:description') || meta('description') || '').slice(0, 240) || null,
+      favicon: icon || `${location.origin}/favicon.ico`,
+      scrollPct: scroll > 0 ? Math.round((scrollY / scroll) * 100) : 0,
+      lang: document.documentElement.lang || null,
+      frame: window !== top,
+    };
+  }
+
+  const onCopy = () => {
+    let details = null;
+    try { details = sourceDetails(); } catch { /* odd pages: still send the basics */ }
+    send({ type: 'copy-context', selection: selection(), details, ...ctx() });
+  };
+  document.addEventListener('copy', onCopy, true);
+  document.addEventListener('cut', onCopy, true);
 
   document.addEventListener('paste', e => {
     const text = e.clipboardData && e.clipboardData.getData('text/plain');

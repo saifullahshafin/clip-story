@@ -57,3 +57,16 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .toast.show { opacity: 1; }
 .empty { padding: 28px 16px; text-align: center; color: var(--muted); }
+.detail { padding: 12px 14px 14px; background: var(--panel); border-bottom: 1px solid var(--line); display: grid; gap: 9px; font-size: 12.5px; }
+.detail .src { display: flex; gap: 10px; align-items: center; }
+.detail .src img { width: 18px; height: 18px; border-radius: 3px; }
+.detail .btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.detail .btns button { padding: 5px 10px; font-size: 12px; }
+.detail .snip { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; color: var(--muted); line-height: 1.5; word-break: break-word; }
+.detail mark { background: #1d3446; color: var(--text); border-radius: 2px; padding: 0 2px; }
+.detail .kv { display: grid; grid-template-columns: 96px 1fr; gap: 10px; }
+.detail .kv > span { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding-top: 1px; }
+.detail .kv > div { word-break: break-word; }
+.detail .rel { padding: 2px 0; }
+button.danger { color: var(--err); }
+button.danger:hover { border-color: var(--err); }

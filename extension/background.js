@@ -32,6 +32,15 @@ let pendingContext = null; // { url, title, domain, ts, h } from the last in-pag
 
 function attachContext(clip, ctx) {
   clip.url = ctx.url; clip.title = ctx.title; clip.domain = ctx.domain; clip.source = 'page';
+  clip.context = ctx.details || null;
+  if (clip.sensitive) stripContext(clip);
+}
+
+// A secret keeps where it came from, never the words around it (they may contain it).
+function stripContext(clip) {
+  if (!clip.context) return;
+  const { heading, element, site, favicon, scrollPct, lang, frame, tab } = clip.context;
+  clip.context = { heading, element, site, favicon, scrollPct, lang, frame, tab };
 }
 
 // A page copy only belongs to a clip if the selected text matches (or the page gave no selection,
@@ -79,11 +88,18 @@ async function makeSecret(clip, text) {
   clip.preview = mask(text.length);
   clip.sealed = await seal(text);
   clip.text = null;
+  stripContext(clip);
 }
 
 async function onCopyContext(msg, sender) {
   const url = sender.url || sender.tab?.url || msg.url;
-  const ctx = { url, title: sender.tab?.title || msg.title, domain: domainOf(url), ts: Date.now(),
+  const details = msg.details && typeof msg.details === 'object' ? msg.details : null;
+  if (details) {
+    details.tab = { title: sender.tab?.title || null, favIconUrl: sender.tab?.favIconUrl || null,
+      incognito: !!sender.tab?.incognito, pinned: !!sender.tab?.pinned, audible: !!sender.tab?.audible };
+    if (sender.tab?.favIconUrl) details.favicon = sender.tab.favIconUrl;
+  }
+  const ctx = { url, title: sender.tab?.title || msg.title, domain: domainOf(url), ts: Date.now(), details,
     h: msg.selection ? await hmac(msg.selection.slice(0, MAX_CHARS)) : null };
   // The poll may already have stored this copy: attach to it instead of waiting.
   const [last] = await db.recent(1);
@@ -135,7 +151,7 @@ async function onRecall(sender, fill) {
 
 // ---------- sync to ARM ----------
 const SERVER_FIELDS = ['id', 'ts', 'last_seen', 'copy_count', 'kind', 'sensitive', 'text', 'sealed', 'preview',
-  'length', 'hmac', 'url', 'title', 'domain', 'source', 'pinned', 'tags', 'uses', 'deleted'];
+  'length', 'hmac', 'url', 'title', 'domain', 'source', 'pinned', 'tags', 'uses', 'context', 'deleted'];
 
 async function api(path, opts = {}) {
   const s = await settings();
@@ -216,6 +232,15 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     pause: () => isExtensionPage(sender) && saveSettings({ pausedUntil: msg.minutes ? Date.now() + msg.minutes * 60_000 : 0 }),
     api: () => { if (!isExtensionPage(sender)) throw new Error('forbidden'); return api(msg.path, msg.opts); },
     badge: () => isExtensionPage(sender) && refreshBadge(),
+    'delete-clip': async () => {
+      if (!isExtensionPage(sender)) return false;
+      const c = (await db.getClip(msg.id)) || msg.clip;
+      if (!c) return false;
+      // Keep a tombstone so the delete reaches ARM, but drop the content now.
+      Object.assign(c, { deleted: true, text: null, sealed: null, preview: '', context: null, hmac: null, tags: [], uses: [], synced: false });
+      await db.putClip(c);
+      return true;
+    },
   };
   const h = handlers[msg?.type];
   if (!h) return false;

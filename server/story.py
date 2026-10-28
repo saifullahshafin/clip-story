@@ -57,6 +57,14 @@ def clip_line(c):
         uses = json.loads(uses or "[]")
     if uses:
         rep += " -> pasted on " + ", ".join(sorted({u.get("domain") or "?" for u in uses}))
+    ctx = c.get("context") or {}
+    if isinstance(ctx, str):
+        ctx = json.loads(ctx or "{}")
+    if ctx.get("heading"):
+        rep += f" | section: \"{ctx['heading'][:80]}\""
+    v = ctx.get("video") or {}
+    if v.get("t") is not None:
+        rep += f" | video at {v['t'] // 60}:{v['t'] % 60:02d}" + (f" by {v['channel']}" if v.get("channel") else "")
     if c.get("sensitive"):
         body = f"[{(c.get('kind') or 'secret').upper()} hidden, {c.get('length') or '?'} chars]"
     else:

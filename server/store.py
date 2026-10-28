@@ -69,6 +69,8 @@ def connect():
     cols = {r["name"] for r in c.execute("PRAGMA table_info(clips)")}
     if "uses" not in cols:
         c.execute("ALTER TABLE clips ADD COLUMN uses TEXT")  # JSON [{domain, ts}] where the clip was pasted
+    if "context" not in cols:
+        c.execute("ALTER TABLE clips ADD COLUMN context TEXT")  # JSON: section, nearby text, video moment, tab
     return c
 
 
@@ -85,13 +87,21 @@ def db():
 def _fts_body(row):
     # Secrets are searchable only by where they were copied, never by value.
     parts = [row.get("title") or "", row.get("domain") or "", row.get("url") or "", row.get("kind") or ""]
+    ctx = row.get("context")
+    if isinstance(ctx, str) and ctx:
+        try:
+            ctx = json.loads(ctx)
+        except ValueError:
+            ctx = None
+    if isinstance(ctx, dict):
+        parts += [ctx.get("heading") or "", ctx.get("site") or "", ((ctx.get("video") or {}).get("channel")) or ""]
     if not row.get("sensitive"):
         parts.insert(0, row.get("text") or "")
     return " ".join(parts)
 
 
 FIELDS = ["id", "ts", "last_seen", "copy_count", "kind", "sensitive", "text", "sealed", "preview",
-          "length", "hmac", "url", "title", "domain", "source", "pinned", "tags", "uses", "deleted"]
+          "length", "hmac", "url", "title", "domain", "source", "pinned", "tags", "uses", "context", "deleted"]
 
 
 def upsert_clips(clips):
@@ -106,7 +116,7 @@ def upsert_clips(clips):
             row["sensitive"] = 1 if row["sensitive"] else 0
             if row["sensitive"]:
                 row["text"] = None  # hard guarantee: plaintext of a secret is never stored here
-            for k in ("sealed", "tags", "uses"):
+            for k in ("sealed", "tags", "uses", "context"):
                 if row[k] is not None and not isinstance(row[k], str):
                     row[k] = json.dumps(row[k])
             row["pinned"] = 1 if row["pinned"] else 0
@@ -128,7 +138,7 @@ def upsert_clips(clips):
 
 def row_dict(r):
     d = dict(r)
-    for k in ("sealed", "tags", "uses", "clip_ids", "open_loops", "entities", "chains", "data"):
+    for k in ("sealed", "tags", "uses", "context", "clip_ids", "open_loops", "entities", "chains", "data"):
         if k in d and isinstance(d[k], str) and d[k][:1] in "[{":
             try:
                 d[k] = json.loads(d[k])

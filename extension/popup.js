@@ -1,5 +1,5 @@
 import * as db from './lib/db.js';
-import { $, esc, bg, api, tagHtml, ago, toast, statusLine } from './lib/ui.js';
+import { $, esc, bg, api, tagHtml, ago, toast, statusLine, detailHtml } from './lib/ui.js';
 import { openSealed } from './lib/crypto.js';
 
 let filter = 'all';
@@ -26,6 +26,7 @@ function row(c) {
       <div class="meta">${esc(login ? 'login for ' + login.slice(6) : where)} · ${ago(c.ts)}${c.copy_count > 1 ? ` · ×${c.copy_count}` : ''}${uses}${c.pinned ? ' · pinned' : ''}</div>
     </div>
     <div class="acts">
+      <button class="ghost" data-a="more" title="Where it came from">More</button>
       ${c.sensitive ? '<button class="ghost" data-a="show" title="Show for 10 s">Show</button>' : ''}
       <button class="ghost" data-a="pin" title="Pin">${c.pinned ? 'Unpin' : 'Pin'}</button>
       ${c.sensitive ? '' : '<button class="ghost" data-a="vault" title="Treat as a secret">Seal</button>'}
@@ -60,7 +61,7 @@ async function render() {
 }
 
 async function load() {
-  clips = await db.recent(2000);
+  clips = (await db.recent(2000)).filter(c => !c.deleted);
   render();
   const { status, settings } = await chrome.storage.local.get(['status', 'settings']);
   const s = statusLine(status, settings);
@@ -102,11 +103,45 @@ $('#list').addEventListener('change', async e => {
   bg('badge');
 });
 
+async function detailAction(e) {
+  const open = e.target.closest('[data-open]');
+  if (open) { chrome.tabs.create({ url: open.dataset.open }); return true; }
+  const d = e.target.closest('[data-d]');
+  if (!d) return !!e.target.closest('.detail');
+  const c = clips.find(x => x.id === d.closest('.detail').dataset.for);
+  if (!c) return true;
+  if (d.dataset.d === 'copy') {
+    await navigator.clipboard.writeText(c.sensitive ? await openSealed(c.sealed) : (c.text || ''));
+    toast('Copied');
+  } else if (d.dataset.d === 'pin') {
+    const local = await db.getClip(c.id);
+    if (local) { local.pinned = !local.pinned; local.synced = false; await db.putClip(local); }
+    load();
+  } else if (d.dataset.d === 'seal') {
+    await bg('make-secret', { id: c.id }); toast('Marked as secret'); load();
+  } else if (d.dataset.d === 'delete') {
+    if (d.dataset.armed) { await bg('delete-clip', { id: c.id, clip: c }); toast('Deleted'); load(); }
+    else { d.dataset.armed = '1'; d.textContent = 'Click again to delete'; }
+  }
+  return true;
+}
+
 $('#list').addEventListener('click', async e => {
+  if (await detailAction(e)) return;
   const el = e.target.closest('.clip');
   if (!el) return;
   const c = clips.find(x => x.id === el.dataset.id);
   const act = e.target.dataset.a;
+  if (act === 'more') {
+    const open = el.nextElementSibling?.classList.contains('detail');
+    document.querySelectorAll('#list .detail').forEach(x => x.remove());
+    if (!open) {
+      const related = c.url ? clips.filter(x => x.url === c.url && x.id !== c.id).slice(0, 5) : [];
+      el.insertAdjacentHTML('afterend', `<div class="detail" data-for="${c.id}">${detailHtml(c, related)}</div>`);
+      el.nextElementSibling.querySelectorAll('img').forEach(i => i.addEventListener('error', () => i.remove()));
+    }
+    return;
+  }
   if (act === 'pin') {
     const local = await db.getClip(c.id);
     if (local) { local.pinned = !local.pinned; local.synced = false; await db.putClip(local); }
