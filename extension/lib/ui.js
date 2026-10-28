@@ -90,6 +90,7 @@ export function detailHtml(c, related = []) {
   return `${source}
     <div class="btns">${open('Open exact spot', x.fragment, true)}${v ? open(`Open video at ${mmss(v.t)}`, v.url || c.url, !x.fragment) : ''}${open('Open page', c.url, !x.fragment && !v)}</div>
     ${snippet}
+    ${x.inferred ? kv('How', 'Copied with a button, menu or the address bar while this tab was open') : ''}
     ${kv('Section', esc(x.heading))}
     ${kv('Inside link', x.link ? `${esc(x.link.text || x.link.href)} <span class="faint">${esc(x.link.href.slice(0, 80))}</span>` : '')}
     ${kv('Video', v ? `${esc(v.videoTitle || c.title || '')}${v.channel ? ' · ' + esc(v.channel) : ''} · at ${mmss(v.t)} of ${mmss(v.duration)}` : '')}

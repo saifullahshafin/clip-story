@@ -44,8 +44,37 @@ function stripContext(clip) {
 }
 
 // A page copy only belongs to a clip if the selected text matches (or the page gave no selection,
-// e.g. a "copy" button). This stops a page's URL landing on an unrelated clip from another app.
-const ctxMatches = (ctx, h) => ctx && Date.now() - ctx.ts < CONTEXT_WINDOW_MS && (!ctx.h || ctx.h === h);
+// e.g. a "copy" button). Whitespace is ignored: Windows rewrites line breaks on the clipboard.
+const norm = t => String(t || '').replace(/\s+/g, ' ').trim().slice(0, 5000);
+function sameText(sel, text) {
+  if (!sel) return true;
+  const n = norm(text);
+  if (sel === n) return true;
+  const [short, long] = sel.length < n.length ? [sel, n] : [n, sel];
+  return short.length > 0 && long.includes(short) && short.length / long.length > 0.8;
+}
+const ctxMatches = (ctx, text) => ctx && Date.now() - ctx.ts < CONTEXT_WINDOW_MS && sameText(ctx.sel, text);
+
+// Fallback when no page claimed the copy (copy buttons, right-click "Copy link", the address bar):
+// if the browser window had focus, the copy almost certainly came from its active tab.
+async function activeTabContext() {
+  try {
+    const win = await chrome.windows.getLastFocused({ populate: true, windowTypes: ['normal'] });
+    if (!win?.focused) return null;
+    const tab = win.tabs.find(t => t.active);
+    if (!tab?.url || !/^https?:/.test(tab.url)) return null;
+    let where = null;
+    try { where = await chrome.tabs.sendMessage(tab.id, { type: 'where' }, { frameId: 0 }); } catch { /* no script in this tab */ }
+    const details = { ...(where?.details || {}) };
+    for (const k of ['before', 'after', 'fragment', 'link', 'element']) delete details[k]; // selection-only fields
+    details.inferred = true;
+    details.tab = { title: tab.title || null, favIconUrl: tab.favIconUrl || null, incognito: !!tab.incognito, pinned: !!tab.pinned, audible: !!tab.audible };
+    if (tab.favIconUrl) details.favicon = tab.favIconUrl;
+    return { url: tab.url, title: tab.title, domain: domainOf(tab.url), ts: Date.now(), details };
+  } catch {
+    return null;
+  }
+}
 
 async function onClip(rawText) {
   const s = await settings();
@@ -54,8 +83,9 @@ async function onClip(rawText) {
   if (!text.trim()) return;
   const now = Date.now();
   const h = await hmac(text);
-  const ctx = ctxMatches(pendingContext, h) ? pendingContext : null;
+  let ctx = ctxMatches(pendingContext, text) ? pendingContext : null;
   if (ctx) pendingContext = null;
+  else ctx = await activeTabContext();
   if (ctx && s.ignoreDomains.includes(ctx.domain)) return;
 
   const same = await db.byHmac(h);
@@ -64,7 +94,7 @@ async function onClip(rawText) {
   if (latest && now - latest.last_seen < RECOPY_WINDOW_MS) {
     latest.last_seen = now;
     latest.copy_count = (latest.copy_count || 1) + 1;
-    if (ctx && !latest.url) attachContext(latest, ctx);
+    if (ctx && (!latest.url || latest.context?.inferred)) attachContext(latest, ctx);
     latest.synced = false;
     await db.putClip(latest);
     return;
@@ -100,10 +130,10 @@ async function onCopyContext(msg, sender) {
     if (sender.tab?.favIconUrl) details.favicon = sender.tab.favIconUrl;
   }
   const ctx = { url, title: sender.tab?.title || msg.title, domain: domainOf(url), ts: Date.now(), details,
-    h: msg.selection ? await hmac(msg.selection.slice(0, MAX_CHARS)) : null };
-  // The poll may already have stored this copy: attach to it instead of waiting.
+    sel: msg.selection ? norm(msg.selection) : null };
+  // The poll may already have stored this copy (possibly with only a guessed tab): upgrade it.
   const [last] = await db.recent(1);
-  if (last && !last.url && Date.now() - last.ts < CONTEXT_WINDOW_MS && ctx.h && last.hmac === ctx.h) {
+  if (last && (!last.url || last.context?.inferred) && Date.now() - last.ts < CONTEXT_WINDOW_MS && ctx.sel && !last.sensitive && sameText(ctx.sel, last.text)) {
     const s = await settings();
     if (s.ignoreDomains.includes(ctx.domain)) return db.deleteClip(last.id);
     attachContext(last, ctx);
@@ -318,8 +348,16 @@ async function boot() {
   chrome.alarms.create('prune', { periodInMinutes: 24 * 60 });
 }
 chrome.runtime.onStartup.addListener(boot);
+// Tabs that were open before install/update never got the content script. Give it to them now.
+async function injectOpenTabs() {
+  const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
+  await Promise.all(tabs.map(t => chrome.scripting.executeScript({ target: { tabId: t.id, allFrames: true }, files: ['content.js'] })
+    .catch(() => { /* chrome web store, discarded tabs, etc. */ })));
+}
+
 chrome.runtime.onInstalled.addListener(d => {
   boot();
+  injectOpenTabs();
   if (d.reason === 'install') chrome.tabs.create({ url: 'dashboard.html#settings' });
 });
 boot();

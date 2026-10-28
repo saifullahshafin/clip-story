@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Clip Story",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Clipboard history that never forgets, keeps secrets sealed, and tells you the story of your week.",
-  "permissions": ["offscreen", "clipboardRead", "clipboardWrite", "storage", "unlimitedStorage", "alarms"],
+  "permissions": ["offscreen", "clipboardRead", "clipboardWrite", "storage", "unlimitedStorage", "alarms", "tabs", "scripting"],
   "host_permissions": ["http://127.0.0.1:8790/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_start", "all_frames": true }],

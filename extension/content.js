@@ -1,6 +1,9 @@
 // Tells Clip Story which page a copy came from and where a clip got pasted,
 // and offers Login Recall on sign-in fields where you pasted a login before.
 (() => {
+  // Injected again into open tabs after an update; skip if a live copy is already here.
+  if (window.__clipStoryAlive?.()) return;
+  window.__clipStoryAlive = () => { try { return !!chrome.runtime?.id; } catch { return false; } };
   const send = msg => { try { return chrome.runtime.sendMessage(msg).catch(() => null); } catch { return Promise.resolve(null); } };
   const ctx = () => ({ url: location.href, title: document.title });
   const selection = () => {
@@ -69,7 +72,11 @@
     return {
       before: i > 0 ? blockText.slice(Math.max(0, i - 220), i) : null,
       after: i >= 0 ? blockText.slice(i + sel.length, i + sel.length + 220) : null,
-      heading: el ? nearestHeading(el) : null,
+      heading: (() => {
+        const start = !inField && s && s.rangeCount ? s.getRangeAt(0).startContainer : el;
+        const se = start ? (start.nodeType === 1 ? start : start.parentElement) : null;
+        return se ? nearestHeading(se) : null;
+      })(),
       element: el ? (inField ? `${a.tagName.toLowerCase()}${a.type ? ':' + a.type : ''}` : (block || el).tagName.toLowerCase()) : null,
       link: link ? { href: link.href, text: clean(link.innerText).slice(0, 120) } : null,
       fragment: inField ? null : fragmentUrl(text),
@@ -90,6 +97,16 @@
   };
   document.addEventListener('copy', onCopy, true);
   document.addEventListener('cut', onCopy, true);
+
+  // Copy buttons (YouTube Share, Gmail "copy email") write the clipboard without a copy event.
+  // The background then asks the active tab where you were.
+  chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+    if (msg?.type !== 'where' || window !== top) return false;
+    let details = null;
+    try { details = sourceDetails(); } catch { /* still answer with the basics */ }
+    reply({ ...ctx(), details });
+    return false;
+  });
 
   document.addEventListener('paste', e => {
     const text = e.clipboardData && e.clipboardData.getData('text/plain');
