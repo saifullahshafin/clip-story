@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Clip Story</title>
+<link rel="stylesheet" href="ui.css">
+<style>
+  body { width: 380px; height: 540px; display: flex; flex-direction: column; }
+  header { padding: 12px 12px 8px; display: flex; align-items: center; gap: 8px; }
+  header .status { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .bar { padding: 0 12px 8px; display: grid; gap: 8px; }
+  #list { flex: 1; overflow-y: auto; border-top: 1px solid var(--line); }
+  footer { border-top: 1px solid var(--line); padding: 8px 12px; display: flex; gap: 6px; align-items: center; }
+  footer .spacer { flex: 1; }
+  .more { padding: 10px 12px; }
+  .answer { margin: 10px 12px; padding: 11px 12px; border: 1px solid #2c4a63; border-radius: 8px; background: #0f1a24; }
+  .answer .lbl { font: 600 9.5px/1 var(--mono); letter-spacing: .16em; color: var(--accent); margin-bottom: 6px; }
+  .loop { display: flex; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); align-items: flex-start; }
+  .loop input { width: auto; margin-top: 3px; accent-color: var(--secret); }
+  .loop.done .t { text-decoration: line-through; color: var(--faint); }
+</style>
+</head>
+<body>
+  <header>
+    <span class="brand">CLIP<b>/</b>STORY</span>
+    <span class="status"><span class="dot" id="dot"></span><span id="statusText"></span></span>
+  </header>
+  <div class="bar">
+    <input id="q" placeholder="Filter, or press Enter to ask your clipboard" autofocus>
+    <div class="chips" id="chips">
+      <button class="chip on" data-f="all">All</button>
+      <button class="chip" data-f="url">Links</button>
+      <button class="chip" data-f="email">Emails</button>
+      <button class="chip" data-f="secret">Secrets</button>
+      <button class="chip" data-f="code">Code</button>
+      <button class="chip" data-f="pinned">Pinned</button>
+      <button class="chip" data-f="loops">Unfinished</button>
+    </div>
+  </div>
+  <div id="list"></div>
+  <footer>
+    <button class="ghost" id="pause" title="Pause capture">Pause</button>
+    <span class="spacer"></span>
+    <button class="primary" id="open">Stories</button>
+  </footer>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
